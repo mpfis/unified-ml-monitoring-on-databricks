@@ -1,4 +1,10 @@
 # Databricks notebook source
+dbutils.widgets.text("workspace", "", "")
+dbutils.widgets.text("subscription_id", "", "")
+dbutils.widgets.text("resource_group", "", "")
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ### Deploy Model as a Web Service in AML
 # MAGIC <img src="https://mcg1stanstor00.blob.core.windows.net/images/demos/Ignite/deploywebservice.jpg" alt="Model Deployment" width="800">
@@ -108,9 +114,9 @@ model_uri = "runs:/"+last_run_id+"/model"
 
 # COMMAND ----------
 
-workspace_name = ""
-subscription_id = ""
-resource_group = ""
+workspace_name = dbutils.widgets.get("workspace")
+subscription_id = dbutils.widgets.get("subscription_id")
+resource_group = dbutils.widgets.get("resource_group")
 
 ws = Workspace.get(name=workspace_name,
                subscription_id=subscription_id,

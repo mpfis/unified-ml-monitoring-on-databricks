@@ -48,6 +48,7 @@ from pyspark.ml.evaluation import BinaryClassificationEvaluator
 # COMMAND ----------
 
 PATH_TO_MLFLOW_EXPERIMENT = "/Shared/UnifiedMLMonitoringWorkshop/LoanRiskClassifierModel"
+# TODO: mlflow.create_experiment()
 mlflow.set_experiment(PATH_TO_MLFLOW_EXPERIMENT)
 
 # COMMAND ----------
@@ -99,6 +100,12 @@ for params in param_groups:
     evaluator = BinaryClassificationEvaluator()
     print("Test Area Under ROC: " + str(evaluator.evaluate(predictions, {evaluator.metricName: "areaUnderROC"})))
     mlflow.log_metric("Area Under ROC", float(evaluator.evaluate(predictions, {evaluator.metricName: "areaUnderROC"})))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC **Optional**
+# MAGIC Deploy model to Azure ML
 
 # COMMAND ----------
 

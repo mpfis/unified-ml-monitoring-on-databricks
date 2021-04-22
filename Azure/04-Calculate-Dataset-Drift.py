@@ -60,3 +60,9 @@ anomalous_jsons = [ {
          random.randint(87,107)+random.random()]
     ]
 } for i in range(0, 100)]
+
+# COMMAND ----------
+
+# - weekly rolling distribution
+# - distribution drifted
+

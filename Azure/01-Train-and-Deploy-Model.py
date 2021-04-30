@@ -1,10 +1,4 @@
 # Databricks notebook source
-dbutils.widgets.text("workspace", "", "")
-dbutils.widgets.text("subscription_id", "", "")
-dbutils.widgets.text("resource_group", "", "")
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC ### Deploy Model as a Web Service in AML
 # MAGIC <img src="https://mcg1stanstor00.blob.core.windows.net/images/demos/Ignite/deploywebservice.jpg" alt="Model Deployment" width="800">
@@ -23,89 +17,119 @@ import mlflow
 import mlflow.spark
 import mlflow.sklearn
 import mlflow.azureml
+from mlflow.exceptions import RestException
 import azureml
 import azureml.core
 
 # COMMAND ----------
 
-loanDF = spark.read.csv("/databricks-datasets/lending-club-loan-stats/LoanStats_2018Q2.csv", header=True, inferSchema=True)
-
-# COMMAND ----------
-
-cleaned_loanDF = loanDF.withColumn("int_rate_cleaned", split(loanDF.int_rate, "%").getItem(0).cast("float")) \
-                                          .drop("int_rate").withColumnRenamed("int_rate_cleaned", "int_rate") \
-                                          .withColumn("term_cleaned", split(loanDF.term, " ")[0].cast("integer")).drop("term").withColumnRenamed("term_cleaned", "term") \
-                                          .drop("idCol")
-
-# COMMAND ----------
-
-from pyspark.mllib.tree import DecisionTree, DecisionTreeModel
-from pyspark.ml.classification import RandomForestClassifier
-from pyspark.mllib.util import MLUtils
-from pyspark.ml.feature import OneHotEncoder, StringIndexer, VectorAssembler
-from pyspark.ml.evaluation import BinaryClassificationEvaluator
-
-# COMMAND ----------
-
-PATH_TO_MLFLOW_EXPERIMENT = "/Shared/UnifiedMLMonitoringWorkshop/LoanRiskClassifierModel"
-# TODO: mlflow.create_experiment()
-mlflow.set_experiment(PATH_TO_MLFLOW_EXPERIMENT)
-
-# COMMAND ----------
-
-maxDepth = [10, 15, 20]
-maxBins = [25, 30, 10]
-
-for params in param_groups:
-  with mlflow.start_run() as run:
-    run_id = run.info.run_uuid
-
-    ## configure stages for Pipeline 
-    categoricalFeatures = ["grade","sub_grade", "application_type", "purpose"]
-    numericFeatures = ["term", "int_rate", "annual_inc", "tax_liens"]
-    stages = []
-    for categoricalCol in categoricalFeatures:
-        stringIndexer = StringIndexer(inputCol = categoricalCol, outputCol = categoricalCol + 'Index')
-        encoder = OneHotEncoder(inputCols=[stringIndexer.getOutputCol()], outputCols=[categoricalCol + "classVec"])
-        stages += [stringIndexer, encoder]
-    labelIndexer = StringIndexer(inputCol="loan_status", outputCol="label")
-    stages += [labelIndexer]
-    assemblerInputs = [col + "classVec" for col in categoricalFeatures] + numericFeatures
-    assembler = VectorAssembler(inputCols=assemblerInputs, outputCol="features")
-    stages += [assembler]
-    ## Log Information to Tracking Server
-    mlflow.log_param("features", categoricalFeatures+numericFeatures)
-
-    ## Fit Pipeline to Dataset
-    from pyspark.ml import Pipeline
-    pipeline = Pipeline(stages = stages)
-    pipelineModel = pipeline.fit(cleaned_loanDF)
-    df = pipelineModel.transform(cleaned_loanDF)
-    selectedCols = ['label', 'features'] + categoricalFeatures + numericFeatures
-    cleanedAndLabeledDF = df.select(*selectedCols)
-    train, test = cleanedAndLabeledDF.randomSplit([0.7, 0.3], seed = 1234)
-    ## Log Information to Tracking Server
-    mlflow.log_param("seed", 1234)
-
-    # configure and fit model
-    rf = RandomForestClassifier(featuresCol = 'features', labelCol = 'label', maxDepth=, maxBins=)
-    rfModel = rf.fit(train)
-    predictions = rfModel.transform(test)
-    predCols = ['rawPrediction', 'probability', 'prediction']
-    mlflow.log_param("maxDepth", maxDepth)
-    mlflow.log_param("maxBins", maxDepth)
-    mlflow.spark.log_model(rfModel, f"loan_risk_model_{run_id}")
-
-    # measure performance of model
-    evaluator = BinaryClassificationEvaluator()
-    print("Test Area Under ROC: " + str(evaluator.evaluate(predictions, {evaluator.metricName: "areaUnderROC"})))
-    mlflow.log_metric("Area Under ROC", float(evaluator.evaluate(predictions, {evaluator.metricName: "areaUnderROC"})))
+# MAGIC %md
+# MAGIC ## Step 1: Upload and Read Sensor Dataset  
+# MAGIC   
+# MAGIC For the training dataset, you will need to upload some data to the Databricks File System (DBFS). Go to File > Upload Data and click "Browse" in the middle box to bring up your file explorer for your local computer. Navigate to the place where you downloaded the artifacts for this workshop and go into the `/Datasets` folder and choose `sensordata.csv`. Once you see a green checkmark, then you just need to press **Next** and then **Done** on the next screen.
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC **Optional**
-# MAGIC Deploy model to Azure ML
+# MAGIC Here we will be creating a database to store some of the tables that we will create during this workshop. The first table will be a Delta Lake table that will hold our uploaded sensor data.
+
+# COMMAND ----------
+
+DB_NAME = "UMLWorkshop"
+spark.sql(f"CREATE DATABASE IF NOT EXISTS {DB_NAME}")
+username = spark.sql("SELECT current_user()").collect()[0][0]
+sensorData = spark.read.csv(f"dbfs:/FileStore/shared_uploads/{username}/sensordata.csv", header=True, inferSchema=True)
+sensorData.write.saveAsTable(f"{DB_NAME}.sensor", format="delta", mode="overwrite")
+dataDf = spark.table("sensor").where(col('Device') == 'Device001')
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC With our sensor data table saved, we can create an MLFlow Experiment to house the metrics that we log during our training runs.  
+# MAGIC   
+# MAGIC First, within our workspace, we need to create a location for the experiment to be created. Go to a location and create a folder to hold the experiment. Copy the path to the newly-created folder into the `PATH_TO_MLFLOW_EXPERIMENT` variable.  
+# MAGIC   
+# MAGIC Next, we first establish a `MlflowClient()` which gives us a connection to the MLFlow Tracking Server and allows us to issue commands via the MLFlow API to do things like create experiments, which we do using `client.create_experiment()`.
+
+# COMMAND ----------
+
+from mlflow.tracking import MlflowClient
+PATH_TO_MLFLOW_EXPERIMENT = "ENTER PATH HERE"
+client = MlflowClient()
+try:
+  experiment_id = client.create_experiment(PATH_TO_MLFLOW_EXPERIMENT)
+except RestException as r:
+  print("Experiment Already Exists, loading experiment...")
+except Exception as e:
+  print(e)
+mlflow.set_experiment(PATH_TO_MLFLOW_EXPERIMENT)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC In this next cell, we take the sensor data and create test and training datasets by splitting up the table using a randomized distribution of data.
+
+# COMMAND ----------
+
+import pandas as pd
+import random
+
+#Setup Test/Train datasets
+data = dataDf.toPandas()
+x = data.drop(["Device", "Time", "Sensor5"], axis=1)
+y = data[["Sensor5"]]
+train_x, test_x, train_y, test_y = train_test_split(x,y,test_size=0.20, random_state=30)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC With our training and test dataset ready, we are able to run a few training runs for our model.  
+# MAGIC   
+# MAGIC We are going to run three runs of the `RandomForestClassifier` from sklearn using the following parameters:  
+# MAGIC ```python
+# MAGIC numEstimators = [10, 15, 20]
+# MAGIC maxDepths = [15, 20, 25]
+# MAGIC ```  
+# MAGIC   
+# MAGIC We will also be leveraging the sklearn autologger to log the parameters for each run, as well as key metrics and the trained model itself. The autologging capabilities of MLFlow make it even easier to get started with training your models and tracking your model performance over various training runs. 
+
+# COMMAND ----------
+
+from sklearn.linear_model import LinearRegression, Lasso
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.ensemble import RandomForestRegressor
+
+
+def fetch_logged_data(run_id):
+    client = mlflow.tracking.MlflowClient()
+    data = client.get_run(run_id).data
+    tags = {k: v for k, v in data.tags.items() if not k.startswith("mlflow.")}
+    artifacts = [f.path for f in client.list_artifacts(run_id, "model")]
+    return data.params, data.metrics, tags, artifacts
+
+numEstimators = [10, 15, 20]
+maxDepths = [15, 20, 25]
+
+mlflow.sklearn.autolog()
+
+for (numEstimator, maxDepth) in [(numTree, maxDepth) for numEstimator in numEstimators for maxDepth in maxDepths]:
+  with mlflow.start_run(run_name="Sensor Regression") as run:
+    # Fit, train, and score the model
+    model = RandomForestRegressor(max_depth = maxDepth, n_estimators = numEstimator)
+    model.fit(train_x, train_y)
+    preds = model.predict(test_x)
+
+# COMMAND ----------
+
+params, metrics, tags, artifacts = fetch_logged_data(run.info.run_id)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC **Optional: For Those with AzureML**  
+# MAGIC   
+# MAGIC The next few steps will walk you through the deployment of the model to Azure Machine Leaning Service. If you **do not** have an AzureML Service stood up, that is fine. You will be able to complete the lab without one.
 
 # COMMAND ----------
 
@@ -115,15 +139,25 @@ from datetime import datetime
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC In this cell, we grab the latest run ID, which is needed to know what model from what run to deploy to AzureML.
+
+# COMMAND ----------
+
 expId = mlflow.get_experiment_by_name(PATH_TO_MLFLOW_EXPERIMENT).experiment_id  
 last_run_id = spark.read.format("mlflow-experiment").load(expId).orderBy(col("end_time").desc()).select("run_id").limit(1).collect()[0][0]
 model_uri = "runs:/"+last_run_id+"/model"
 
 # COMMAND ----------
 
-workspace_name = dbutils.widgets.get("workspace")
-subscription_id = dbutils.widgets.get("subscription_id")
-resource_group = dbutils.widgets.get("resource_group")
+# MAGIC %md
+# MAGIC Here we establish a connection to the AzureML workspace so that we can deploy the model that is logged in MLFlow.
+
+# COMMAND ----------
+
+workspace_name = "ENTER WORKSPACE NAME"
+subscription_id = "ENTER SUBSCRIPTION ID" ## add as secret?
+resource_group = "RESOURCE GROUP NAME"
 
 ws = Workspace.get(name=workspace_name,
                subscription_id=subscription_id,
@@ -131,7 +165,17 @@ ws = Workspace.get(name=workspace_name,
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC In this cell, we establish a `Deployment Configuration` in which we enable logging to Application Insights to ensure that we can capture and query model response and trace information for monitoring purposes.
+
+# COMMAND ----------
+
 service_config = AciWebservice.deploy_configuration(cpu_cores=1, memory_gb=1, enable_app_insights=True, collect_model_data=True)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC In this last cell, the model from MLFlow and the Deployment Configuration are packaged together, sent to Azure ML, and deployed as an endpoint hosted on an Azure Container Instance.
 
 # COMMAND ----------
 
@@ -141,11 +185,3 @@ azure_service, azure_model = mlflow.azureml.deploy(model_uri=model_uri,
                                                    deployment_config=service_config,
                                                    synchronous=True,
                                                    tags={"mlflowExperiment":PATH_TO_MLFLOW_EXPERIMENT})
-
-# COMMAND ----------
-
-# Add Scoring URI for the Experiment to the internal table tracking them
-now = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
-spark.createDataFrame([[PATH_TO_MLFLOW_EXPERIMENT,endpointName,model_uri, now]], 
-                      ["experimentName", "endpointName", "scoringURI", "_ts"]) \
-              .write.saveAsTable(f"{DB_NAME}.experimentScoringURIs", format="delta", mode="append")

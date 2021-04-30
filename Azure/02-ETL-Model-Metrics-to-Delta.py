@@ -1,30 +1,11 @@
 # Databricks notebook source
-# Extract MLFlow
-# Extract App Insights
-# Extract Azure Metrics
-
-## Student Version -- pull prepared datasets from GitHub and then transform / load to Delta for Azure Metrics / App Insights
-## Instructor Version -- extract directly from sources
-
-## Both would still pull from MLFlow
-
-# COMMAND ----------
-
 from pyspark.sql.types import *
 from pyspark.sql.functions import *
 from delta.tables import *
+import json, datetime, os, sys, pickle
 import mlflow
-import json
-from pyspark.sql.types import *
-from pyspark.sql.functions import *
 import requests
-import json
-import logging
-import datetime
-import os
-import sys
 import pandas as pd
-from delta.tables import *
 
 # COMMAND ----------
 
@@ -65,12 +46,7 @@ refined_df.write.saveAsTable(f"{DB_NAME}.experiment_data_bronze")
 
 # COMMAND ----------
 
-import pickle
-app_insights = pickle.load(open("/databricks/driver/unified-ml-monitoring-on-databricks/Datasets/appInsightsRawData.pkl"))
-
-# COMMAND ----------
-
-## Load from PKL file
+app_insights_data = pickle.load(open("/databricks/driver/unified-ml-monitoring-on-databricks/Datasets/appInsightsRawData.pkl", "rb"))
 
 # COMMAND ----------
 
@@ -78,8 +54,7 @@ def extractRequiredAppInsightsData (row):
   return [row[0], json.loads(row[4])["Workspace Name"], json.loads(row[4])["Service Name"], json.loads(row[4])["Container Id"], 
           json.loads(row[4])["Prediction"], json.loads(row[4])["Request Id"], json.loads(row[4])["Models"], json.loads(row[4])["Input"], row[-5]]
 
-columns = response_sample['Columns']
-rows = [extractRequiredAppInsightsData(row) for row in response_sample['Rows']]
+rows = [extractRequiredAppInsightsData(row) for row in app_insights_data]
 
 responseSchema = StructType([
   StructField("ResponseValue", StringType(), True), 
@@ -101,28 +76,18 @@ appInsightsDF_Filtered.write.saveAsTable(f"{DB_NAME}.response_data_bronze", form
 
 # COMMAND ----------
 
-## merge
-existingTable = DeltaTable.forName(spark, f"{DB_NAME}.response_data_bronze")
-existingTable.alias("s").merge(
-  appInsightsDF_Filtered.alias("t"),
-  "s.requestID = t.requestID") \
-.whenNotMatchedInsertAll() \
-.execute()
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC ## Azure Metrics
 
 # COMMAND ----------
 
-## Load data from PKL file
+metrics_data_files = [spark.createDataFrame(json.loads('{ "data":['+pickle.load(open("/databricks/driver/unified-ml-monitoring-on-databricks/Datasets/"+filename,"rb"))[1:-1]+']}')['data']) for filename in os.listdir("/databricks/driver/unified-ml-monitoring-on-databricks/Datasets/") if "_raw_data" in filename]
 
 # COMMAND ----------
 
 from functools import reduce
 from pyspark.sql import DataFrame
-unionedDFs = reduce(DataFrame.unionAll, metricDfs)
+unionedDFs = reduce(DataFrame.unionAll, metrics_data_files)
 
 # COMMAND ----------
 
@@ -140,13 +105,3 @@ unioned_metrics_for_model = unionedDFs.withColumn("date", col("timeStamp").cast(
 # COMMAND ----------
 
 unioned_metrics_for_model.write.saveAsTable(f"{DB_NAME}.endpoint_metrics_bronze", format="delta", mode="overwrite")
-
-# COMMAND ----------
-
-## merge
-existingTable = DeltaTable.forName(spark, f"{DB_NAME}.endpoint_metrics_bronze")
-existingTable.alias("s").merge(
-  unioned_metrics_for_model.alias("t"),
-  "s.timeStamp = t.timeStamp") \
-.whenNotMatchedInsertAll() \
-.execute()

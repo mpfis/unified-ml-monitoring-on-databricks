@@ -10,7 +10,21 @@
 
 # COMMAND ----------
 
-# MAGIC %run ./00-Setup
+from pyspark.sql.types import *
+from pyspark.sql.functions import *
+from delta.tables import *
+import mlflow
+import json
+from pyspark.sql.types import *
+from pyspark.sql.functions import *
+import requests
+import json
+import logging
+import datetime
+import os
+import sys
+import pandas as pd
+from delta.tables import *
 
 # COMMAND ----------
 
@@ -43,6 +57,16 @@ refined_df.write.saveAsTable(f"{DB_NAME}.experiment_data_bronze")
 
 # MAGIC %md
 # MAGIC ## Azure App Insights
+
+# COMMAND ----------
+
+# MAGIC %sh
+# MAGIC git clone https://github.com/mpfis/unified-ml-monitoring-on-databricks.git
+
+# COMMAND ----------
+
+import pickle
+app_insights = pickle.load(open("/databricks/driver/unified-ml-monitoring-on-databricks/Datasets/appInsightsRawData.pkl"))
 
 # COMMAND ----------
 

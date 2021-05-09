@@ -1,13 +1,36 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC ### Deploy Model as a Web Service in AML
-# MAGIC <img src="https://mcg1stanstor00.blob.core.windows.net/images/demos/Ignite/deploywebservice.jpg" alt="Model Deployment" width="800">
-# MAGIC </br></br>
-# MAGIC The MLFlow model will conainerized and deployed as a web service with AML and Azure Container Instances
+# MAGIC # Train and Deploy Model using MLFlow
 
 # COMMAND ----------
 
-# MAGIC %pip install azureml-mlflow
+# MAGIC %md
+# MAGIC ## Step 0: Setup Environment
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Azure Libraries
+
+# COMMAND ----------
+
+## Azure Users
+%pip install azureml-mlflow
+
+# COMMAND ----------
+
+import azureml
+import azureml.core
+import mlflow.azureml
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### General Libraries
+
+# COMMAND ----------
+
+dbutils.widgets.text("PATH_TO_EXPERIMENT", "")
 
 # COMMAND ----------
 
@@ -16,31 +39,35 @@ from pyspark.sql.functions import *
 import mlflow
 import mlflow.spark
 import mlflow.sklearn
-import mlflow.azureml
+from sklearn.model_selection import train_test_split
 from mlflow.exceptions import RestException
-import azureml
-import azureml.core
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Step 1: Upload and Read Sensor Dataset  
+# MAGIC ### Upload and Read Sensor Dataset  
 # MAGIC   
 # MAGIC For the training dataset, you will need to upload some data to the Databricks File System (DBFS). Go to File > Upload Data and click "Browse" in the middle box to bring up your file explorer for your local computer. Navigate to the place where you downloaded the artifacts for this workshop and go into the `/Datasets` folder and choose `sensordata.csv`. Once you see a green checkmark, then you just need to press **Next** and then **Done** on the next screen.
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC Here we will be creating a database to store some of the tables that we will create during this workshop. The first table will be a Delta Lake table that will hold our uploaded sensor data.
+# MAGIC %sh
+# MAGIC git clone https://github.com/mpfis/unified-ml-monitoring-on-databricks.git
 
 # COMMAND ----------
 
 DB_NAME = "UMLWorkshop"
 spark.sql(f"CREATE DATABASE IF NOT EXISTS {DB_NAME}")
 username = spark.sql("SELECT current_user()").collect()[0][0]
+dbutils.fs.cp("file:/databricks/driver/unified-ml-monitoring-on-databricks/Datasets/sensordata.csv", f"dbfs:/FileStore/shared_uploads/{username}/sensordata.csv")
 sensorData = spark.read.csv(f"dbfs:/FileStore/shared_uploads/{username}/sensordata.csv", header=True, inferSchema=True)
 sensorData.write.saveAsTable(f"{DB_NAME}.sensor", format="delta", mode="overwrite")
 dataDf = spark.table("sensor").where(col('Device') == 'Device001')
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Step 1: Train the Model with MLFlow
 
 # COMMAND ----------
 
@@ -53,8 +80,13 @@ dataDf = spark.table("sensor").where(col('Device') == 'Device001')
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ### Create or Load Experiment
+
+# COMMAND ----------
+
 from mlflow.tracking import MlflowClient
-PATH_TO_MLFLOW_EXPERIMENT = "ENTER PATH HERE"
+PATH_TO_MLFLOW_EXPERIMENT = dbutils.widgets.get("PATH_TO_EXPERIMENT")
 client = MlflowClient()
 try:
   experiment_id = client.create_experiment(PATH_TO_MLFLOW_EXPERIMENT)
@@ -63,6 +95,11 @@ except RestException as r:
 except Exception as e:
   print(e)
 mlflow.set_experiment(PATH_TO_MLFLOW_EXPERIMENT)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Prepare Data for Training
 
 # COMMAND ----------
 
@@ -83,6 +120,7 @@ train_x, test_x, train_y, test_y = train_test_split(x,y,test_size=0.20, random_s
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ### Train Model  
 # MAGIC With our training and test dataset ready, we are able to run a few training runs for our model.  
 # MAGIC   
 # MAGIC We are going to run three runs of the `RandomForestClassifier` from sklearn using the following parameters:  
@@ -113,7 +151,7 @@ maxDepths = [15, 20, 25]
 
 mlflow.sklearn.autolog()
 
-for (numEstimator, maxDepth) in [(numTree, maxDepth) for numEstimator in numEstimators for maxDepth in maxDepths]:
+for (numEstimator, maxDepth) in [(numEstimator, maxDepth) for numEstimator in numEstimators for maxDepth in maxDepths]:
   with mlflow.start_run(run_name="Sensor Regression") as run:
     # Fit, train, and score the model
     model = RandomForestRegressor(max_depth = maxDepth, n_estimators = numEstimator)
@@ -126,8 +164,71 @@ params, metrics, tags, artifacts = fetch_logged_data(run.info.run_id)
 
 # COMMAND ----------
 
+print(params,"\n", metrics,"\n", tags,"\n", artifacts)
+
+# COMMAND ----------
+
 # MAGIC %md
-# MAGIC **Optional: For Those with AzureML**  
+# MAGIC ## Step 2: Register Model with MLFlow Model Registry
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Register the Model in the MLFlow Model Registry
+
+# COMMAND ----------
+
+randID = str(random.randint(1000,5000))
+modelName = f"sensor-prediction-model-{randID}"
+mlflow.register_model(
+    f"runs:/{run.info.run_id}/model",
+    modelName
+)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Transition the Model to "Staging"
+
+# COMMAND ----------
+
+client = MlflowClient()
+client.transition_model_version_stage(
+    name=modelName,
+    version=1,
+    stage="Staging"
+)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Test and Move Model to Production using MLFlow Registry
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC In this part of the lab, we will demonstrate a potential flow for testing the model and then transitioning the model to the "Production" state.  
+# MAGIC   
+# MAGIC We will use this example request to test the model:  
+# MAGIC ```json
+# MAGIC {"columns": ["Sensor1", "Sensor2", "Sensor3", "Sensor4"], "data": [[70.4843795946883, 18347.021600937504, 51.38152543807783, 71.97184461064535]]}
+# MAGIC ```
+# MAGIC   
+# MAGIC On your own, follow along in the MLFlow Registry by going to the "Models" tab on the left-hand bar of the Databricks Workspace.  
+# MAGIC   
+# MAGIC After we are done in the registry, we will come back to this notebook.  
+# MAGIC   
+# MAGIC **NOTE**: All of this can be automated by using the MLFlow APIs.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Step 3: Deploy to AzureML / AWS SageMaker
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Optional: For Those with AzureML
 # MAGIC   
 # MAGIC The next few steps will walk you through the deployment of the model to Azure Machine Leaning Service. If you **do not** have an AzureML Service stood up, that is fine. You will be able to complete the lab without one.
 
@@ -156,7 +257,7 @@ model_uri = "runs:/"+last_run_id+"/model"
 # COMMAND ----------
 
 workspace_name = "ENTER WORKSPACE NAME"
-subscription_id = "ENTER SUBSCRIPTION ID" ## add as secret?
+subscription_id = "ENTER SUBSCRIPTION ID"
 resource_group = "RESOURCE GROUP NAME"
 
 ws = Workspace.get(name=workspace_name,

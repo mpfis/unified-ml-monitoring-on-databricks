@@ -9,33 +9,13 @@
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ### Azure Libraries
-
-# COMMAND ----------
-
-## Azure Users
-%pip install azureml-mlflow
-
-# COMMAND ----------
-
-import azureml
-import azureml.core
-import mlflow.azureml
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### General Libraries
-
-# COMMAND ----------
-
 dbutils.widgets.text("PATH_TO_EXPERIMENT", "")
 
 # COMMAND ----------
 
 from pyspark.sql.types import *
 from pyspark.sql.functions import *
+import zipfile
 import mlflow
 import mlflow.spark
 import mlflow.sklearn
@@ -56,10 +36,15 @@ from mlflow.exceptions import RestException
 
 # COMMAND ----------
 
+with zipfile.ZipFile("/databricks/driver/unified-ml-monitoring-on-databricks/Datasets/sensordata.csv.zip","r") as zip_ref:
+    zip_ref.extractall("/databricks/driver/unified-ml-monitoring-on-databricks/Datasets/data/")
+
+# COMMAND ----------
+
 DB_NAME = "UMLWorkshop"
 spark.sql(f"CREATE DATABASE IF NOT EXISTS {DB_NAME}")
 username = spark.sql("SELECT current_user()").collect()[0][0]
-dbutils.fs.cp("file:/databricks/driver/unified-ml-monitoring-on-databricks/Datasets/sensordata.csv", f"dbfs:/FileStore/shared_uploads/{username}/sensordata.csv")
+dbutils.fs.cp("file:/databricks/driver/unified-ml-monitoring-on-databricks/Datasets/data/sensordata.csv", f"dbfs:/FileStore/shared_uploads/{username}/sensordata.csv")
 sensorData = spark.read.csv(f"dbfs:/FileStore/shared_uploads/{username}/sensordata.csv", header=True, inferSchema=True)
 sensorData.write.saveAsTable(f"{DB_NAME}.sensor", format="delta", mode="overwrite")
 dataDf = spark.table("sensor").where(col('Device') == 'Device001')
@@ -223,17 +208,14 @@ client.transition_model_version_stage(
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Step 3: Deploy to AzureML / AWS SageMaker
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### Optional: For Those with AzureML
-# MAGIC   
+# MAGIC ## OPTIONAL: Deploy to Azure Machine Learning Service  
 # MAGIC The next few steps will walk you through the deployment of the model to Azure Machine Leaning Service. If you **do not** have an AzureML Service stood up, that is fine. You will be able to complete the lab without one.
 
 # COMMAND ----------
 
+import azureml
+import azureml.core
+import mlflow.azureml
 from azureml.core import Workspace
 from azureml.core.webservice import AciWebservice, AksWebservice
 from datetime import datetime

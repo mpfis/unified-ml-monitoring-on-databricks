@@ -1,4 +1,9 @@
 # Databricks notebook source
+# MAGIC %md
+# MAGIC # Extract Model Lifecycle Information into Delta Lake
+
+# COMMAND ----------
+
 from pyspark.sql.types import *
 from pyspark.sql.functions import *
 from delta.tables import *
@@ -9,16 +14,25 @@ import pandas as pd
 
 # COMMAND ----------
 
-PATH_TO_MLFLOW_EXPERIMENT = "ENTER PATH TO MLFLOW EXPERIMENT"
+dbutils.widgets.text("PATH_TO_EXPERIMENT", "")
+
+# COMMAND ----------
+
+DB_NAME = "UMLWorkshop"
+PATH_TO_EXPERIMENT = dbutils.widgets.get("PATH_TO_EXPERIMENT")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## MLFlow
+# MAGIC ## MLFlow  
+# MAGIC   
+# MAGIC First, we will extract the data in the MLFlow Tracking Server to obtain the information surrounding the action experiments. In the cell below, we just provide the path to the MLFLow Experiment, derive the experiment ID, and then leverage the `mlflow-experiment` Reader in Databricks to extract the information for our sensor prediction experiment.  
+# MAGIC   
+# MAGIC The actual transformations applied to the DataFrame of extracted data can be applied to **any MLFLow experiment** and it will extract the metrics and parameters logged to the experiment. This is because the actual structure of the expected DataFrame is constant and we simply need to `map_concat()` and then `explode()` the metrics and paramters to get them pivoted into `key` and `value` columns. This also gets it into an ideal structure for querying and visualization in SQL Analytics.
 
 # COMMAND ----------
 
-expId = mlflow.get_experiment_by_name(PATH_TO_MLFLOW_EXPERIMENT).experiment_id
+expId = mlflow.get_experiment_by_name(PATH_TO_EXPERIMENT).experiment_id
 
 df = spark.read.format("mlflow-experiment").load(expId)
 
@@ -36,8 +50,16 @@ refined_df.write.saveAsTable(f"{DB_NAME}.experiment_data_bronze")
 
 # COMMAND ----------
 
+display(refined_df.limit(10))
+
+# COMMAND ----------
+
 # MAGIC %md
-# MAGIC ## Azure App Insights
+# MAGIC ## Azure App Insights  
+# MAGIC   
+# MAGIC After pulling information about the experiment from MLFlow, we can extract information from Azure Application Insights. In Azure Application Insights, we can extract trace and response information. **Trace** information holds the data sent to the model to be scored, and the **Response** inforamtion holds the response / score that the model returned.  
+# MAGIC   
+# MAGIC For the lab, we will parse an example raw dump of this Application Insights data to get the **trace** and **response** data. To extract Application Insights data directly, check out the **AzureDataModelExtraction** notebook in the `/Examples/Azure/` folder of this [repository](https://github.com/mpfis/unified-ml-monitoring-on-databricks).
 
 # COMMAND ----------
 
@@ -63,12 +85,11 @@ responseSchema = StructType([
 
 # COMMAND ----------
 
+endpointName = "sensorpredictionbeta-service"
 appInsightsDF = spark.createDataFrame(rows, ["timestamp", "workspaceName", "endpointName", "containerId", "response", "requestId", "model", "inputData", "mlWorkspace"])
 appInsightsDF_Filtered = appInsightsDF.filter(appInsightsDF.endpointName.contains(endpointName))
-appInsightsDF_Filtered = appInsightsDF_Filtered.withColumn("pathToExperiment", lit(pathToExperiment)) \
-                                                .withColumn("run_id", lit(run_id)) \
-                                                .withColumn("endpointName", lit(endpointName)) \
-                                                .withColumn("deploymentTarget", lit(deployment_target))
+appInsightsDF_Filtered = appInsightsDF_Filtered.withColumn("pathToExperiment", lit(PATH_TO_EXPERIMENT)) \
+                                                .withColumn("endpointName", lit(endpointName))
 
 # COMMAND ----------
 
@@ -76,8 +97,16 @@ appInsightsDF_Filtered.write.saveAsTable(f"{DB_NAME}.response_data_bronze", form
 
 # COMMAND ----------
 
+display(appInsightsDF_Filtered.limit(10))
+
+# COMMAND ----------
+
 # MAGIC %md
-# MAGIC ## Azure Metrics
+# MAGIC ## Azure Metrics  
+# MAGIC   
+# MAGIC Another important set of data points to measure and monitor is the information coming from the underlying infrastructure supporting the model application itself. Azure Metrics can be queried to get information on the CPU Usage, Memory Usage, and Network Traffic of an endpoint that is supporting a model in Azure.  
+# MAGIC   
+# MAGIC For the lab, we will parse an example raw dump of this Azure Metrics data to get data. To extract Azure Metrics data directly, check out the **AzureDataModelExtraction** notebook in the `/Examples/Azure/` folder of this [repository](https://github.com/mpfis/unified-ml-monitoring-on-databricks).
 
 # COMMAND ----------
 
@@ -91,10 +120,14 @@ unionedDFs = reduce(DataFrame.unionAll, metrics_data_files)
 
 # COMMAND ----------
 
+display(unionedDFs)
+
+# COMMAND ----------
+
 unioned_metrics_for_model = unionedDFs.withColumn("date", col("timeStamp").cast("date")) \
                                           .withColumn("hour", hour("timeStamp")) \
-                                          .groupBy("endpoint_name", "date", "hour", "metric").agg(avg("average").alias("value")) \
-                                          .groupBy("endpoint_name", "date", "hour").pivot("metric").sum("value") \
+                                          .groupBy("date", "hour", "metric").agg(avg("average").alias("value")) \
+                                          .groupBy("date", "hour").pivot("metric").sum("value") \
                                           .withColumn("timeStamp", (unix_timestamp(col('date').cast("timestamp"))+(col("hour")*3600)).cast("timestamp")) \
                                           .withColumn("MemoryUsageMB", col("MemoryUsage")/1000000) \
                                           .withColumn("pathToExperiment", lit(pathToExperiment)) \
@@ -105,3 +138,13 @@ unioned_metrics_for_model = unionedDFs.withColumn("date", col("timeStamp").cast(
 # COMMAND ----------
 
 unioned_metrics_for_model.write.saveAsTable(f"{DB_NAME}.endpoint_metrics_bronze", format="delta", mode="overwrite")
+
+# COMMAND ----------
+
+display(unioned_metrics_for_model)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Next Step  
+# MAGIC With the model trained, deployed and its operational / training metrics extracted we can leverage these data points to first establish a process for calculating data drift and build a unified monitoring solution.  

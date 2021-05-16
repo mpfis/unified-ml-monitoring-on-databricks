@@ -110,17 +110,18 @@ display(appInsightsDF_Filtered.limit(10))
 
 # COMMAND ----------
 
-metrics_data_files = [spark.createDataFrame(json.loads('{ "data":['+pickle.load(open("/databricks/driver/unified-ml-monitoring-on-databricks/Datasets/"+filename,"rb"))[1:-1]+']}')['data']) for filename in os.listdir("/databricks/driver/unified-ml-monitoring-on-databricks/Datasets/") if "_raw_data" in filename]
+metric_file_names = [name for name in os.listdir("/databricks/driver/unified-ml-monitoring-on-databricks/Datasets/") if "_raw_data" in name]
+metrics_data_files = [json.loads('{ "data":['+pickle.load(open("/databricks/driver/unified-ml-monitoring-on-databricks/Datasets/"+filename,"rb"))[1:-1]+']}')['data'] for filename in os.listdir("/databricks/driver/unified-ml-monitoring-on-databricks/Datasets/") if "_raw_data" in filename]
+for idx, metric_datafile in enumerate(metrics_data_files):
+  for reading in metric_datafile:
+    reading["metric"] = metric_file_names[idx].split("_raw_data.pkl")[0]
+metrics_data_dfs = [spark.createDataFrame(metric_data_file) for metric_data_file in metrics_data_files]
 
 # COMMAND ----------
 
 from functools import reduce
 from pyspark.sql import DataFrame
-unionedDFs = reduce(DataFrame.unionAll, metrics_data_files)
-
-# COMMAND ----------
-
-display(unionedDFs)
+unionedDFs = reduce(DataFrame.unionAll, metrics_data_dfs)
 
 # COMMAND ----------
 
@@ -130,10 +131,7 @@ unioned_metrics_for_model = unionedDFs.withColumn("date", col("timeStamp").cast(
                                           .groupBy("date", "hour").pivot("metric").sum("value") \
                                           .withColumn("timeStamp", (unix_timestamp(col('date').cast("timestamp"))+(col("hour")*3600)).cast("timestamp")) \
                                           .withColumn("MemoryUsageMB", col("MemoryUsage")/1000000) \
-                                          .withColumn("pathToExperiment", lit(pathToExperiment)) \
-                                          .withColumn("run_id", lit(run_id)) \
-                                          .withColumn("endpointName", lit(endpointName)) \
-                                          .withColumn("deploymentTarget", lit(deployment_target))
+                                          .withColumn("pathToExperiment", lit(PATH_TO_EXPERIMENT))
 
 # COMMAND ----------
 

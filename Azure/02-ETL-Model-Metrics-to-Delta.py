@@ -15,10 +15,11 @@ import pandas as pd
 # COMMAND ----------
 
 dbutils.widgets.text("PATH_TO_EXPERIMENT", "")
+dbutils.widgets.text("DB_NAME", "")
 
 # COMMAND ----------
 
-DB_NAME = "UMLWorkshop"
+DB_NAME = dbutils.widgets.get("DB_NAME")
 PATH_TO_EXPERIMENT = dbutils.widgets.get("PATH_TO_EXPERIMENT")
 
 # COMMAND ----------
@@ -98,6 +99,52 @@ appInsightsDF_Filtered.write.saveAsTable(f"{DB_NAME}.response_data_bronze", form
 # COMMAND ----------
 
 display(appInsightsDF_Filtered.limit(10))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC This data is still *pretty* messy. Let's **refine** this bronze-level data a bit more so that we have a silver level table.
+
+# COMMAND ----------
+
+bronze_data = spark.read.table(f"{DB_NAME}.response_data_bronze")
+
+columns = bronze_data.columns
+
+bronze_data = bronze_data.select(col("timestamp").cast("timestamp"), *columns[1:])
+
+def str_to_json(t):
+  return json.loads(t)
+
+jsonify = udf(str_to_json, StringType())
+
+spark.udf.register('jsonify', jsonify)
+
+columns_copy = columns.copy()
+columns_copy.remove("response")
+
+schema = StructType([
+  StructField("columns", ArrayType(StringType()), True),
+  StructField("index", ArrayType(IntegerType()), True),
+  StructField("data", ArrayType(ArrayType(FloatType())), True)
+])
+
+bronze_to_silver = bronze_data.select(regexp_replace("response", '\[|\]', "").cast("float").alias("response"), *columns_copy) \
+                                    .withColumn("processedInput", from_json(jsonify(col("inputData")), schema)) \
+                                    .withColumn("input", col("processedInput.data")) \
+                                    .withColumn("extractedColumns", col("processedInput.columns")) \
+                                    .select(explode("input").alias("inputPart"), "*").withColumn("mappedInput", map_from_arrays(col("extractedColumns"), col("inputPart"))) \
+                                    .select("timestamp", "pathToExperiment","model", "requestId", "response", "mappedInput") \
+                                    .groupBy(["timestamp", "pathToExperiment","model", "requestId", "response"]).agg(collect_list("mappedInput").alias('input')) \
+                                    .withColumn("mappedInputandPrediction", struct(col("response"), col("input")))
+
+# COMMAND ----------
+
+bronze_to_silver.write.saveAsTable(f"{DB_NAME}.response_data_silver", format="delta", mode="overwrite")
+
+# COMMAND ----------
+
+display(bronze_to_silver.limit(10))
 
 # COMMAND ----------
 

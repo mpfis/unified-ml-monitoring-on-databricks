@@ -10,6 +10,7 @@
 # COMMAND ----------
 
 dbutils.widgets.text("PATH_TO_EXPERIMENT", "")
+dbutils.widgets.text("DB_NAME", "")
 
 # COMMAND ----------
 
@@ -25,9 +26,15 @@ from mlflow.exceptions import RestException
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC **NOTE**: If you get a missing library error for mlflow for the above cell. Create a cell **above** the previous cell with all the library imports and add this:  
+# MAGIC `%pip install mlflow` and then try again. If you are still seeing an issue, put in the Lab Live Chat your specific issue.
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ### Upload and Read Sensor Dataset  
-# MAGIC   
-# MAGIC For the training dataset, you will need to upload some data to the Databricks File System (DBFS). Go to File > Upload Data and click "Browse" in the middle box to bring up your file explorer for your local computer. Navigate to the place where you downloaded the artifacts for this workshop and go into the `/Datasets` folder and choose `sensordata.csv`. Once you see a green checkmark, then you just need to press **Next** and then **Done** on the next screen.
+# MAGIC 
+# MAGIC The dataset that we will use to train the model is provided in the GitHub repository for this workshop. We can simply clone this repository to the cluster itself and read the data file. This makes it easy for us here in the lab environment, but typically our datasets are not this small. This step would usually be a read operation from Azure Data Lake Storage, AWS S3, or Google Cloud Storage (GCS).
 
 # COMMAND ----------
 
@@ -41,7 +48,7 @@ with zipfile.ZipFile("/databricks/driver/unified-ml-monitoring-on-databricks/Dat
 
 # COMMAND ----------
 
-DB_NAME = "UMLWorkshop"
+DB_NAME = dbutils.widgets.get("DB_NAME")
 spark.sql(f"CREATE DATABASE IF NOT EXISTS {DB_NAME}")
 username = spark.sql("SELECT current_user()").collect()[0][0]
 dbutils.fs.cp("file:/databricks/driver/unified-ml-monitoring-on-databricks/Datasets/data/sensordata.csv", f"dbfs:/FileStore/shared_uploads/{username}/sensordata.csv")

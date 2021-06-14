@@ -137,6 +137,10 @@ data_drift.write.saveAsTable(f"{DB_NAME}.sensor_data_drift", mode="append", form
 
 # COMMAND ----------
 
+display(spark.table(f"{DB_NAME}.sensor_data_drift"))
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Next Steps  
 # MAGIC   

@@ -54,7 +54,7 @@ username = spark.sql("SELECT current_user()").collect()[0][0]
 dbutils.fs.cp("file:/databricks/driver/unified-ml-monitoring-on-databricks/Datasets/data/sensordata.csv", f"dbfs:/FileStore/shared_uploads/{username}/sensordata.csv")
 sensorData = spark.read.csv(f"dbfs:/FileStore/shared_uploads/{username}/sensordata.csv", header=True, inferSchema=True)
 sensorData.write.saveAsTable(f"{DB_NAME}.sensor", format="delta", mode="overwrite")
-dataDf = spark.table("sensor").where(col('Device') == 'Device001')
+dataDf = spark.table(f"{DB_NAME}.sensor").where(col('Device') == 'Device001')
 
 # COMMAND ----------
 

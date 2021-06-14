@@ -47,7 +47,7 @@ refined_df = df.select(col('run_id'), col("experiment_id"), explode(map_concat(c
 
 # COMMAND ----------
 
-refined_df.write.saveAsTable(f"{DB_NAME}.experiment_data_bronze")
+refined_df.write.mode("overwrite").saveAsTable(f"{DB_NAME}.experiment_data_bronze")
 
 # COMMAND ----------
 

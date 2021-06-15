@@ -9,11 +9,6 @@
 
 # COMMAND ----------
 
-dbutils.widgets.text("PATH_TO_EXPERIMENT", "")
-dbutils.widgets.text("DB_NAME", "")
-
-# COMMAND ----------
-
 from pyspark.sql.types import *
 from pyspark.sql.functions import *
 import zipfile
@@ -38,6 +33,10 @@ from mlflow.exceptions import RestException
 
 # COMMAND ----------
 
+# MAGIC %run ../Lab/00-Setup
+
+# COMMAND ----------
+
 # MAGIC %sh
 # MAGIC git clone https://github.com/mpfis/unified-ml-monitoring-on-databricks.git
 
@@ -48,7 +47,6 @@ with zipfile.ZipFile("/databricks/driver/unified-ml-monitoring-on-databricks/Dat
 
 # COMMAND ----------
 
-DB_NAME = dbutils.widgets.get("DB_NAME")
 spark.sql(f"CREATE DATABASE IF NOT EXISTS {DB_NAME}")
 username = spark.sql("SELECT current_user()").collect()[0][0]
 dbutils.fs.cp("file:/databricks/driver/unified-ml-monitoring-on-databricks/Datasets/data/sensordata.csv", f"dbfs:/FileStore/shared_uploads/{username}/sensordata.csv")
@@ -78,7 +76,6 @@ dataDf = spark.table(f"{DB_NAME}.sensor").where(col('Device') == 'Device001')
 # COMMAND ----------
 
 from mlflow.tracking import MlflowClient
-PATH_TO_MLFLOW_EXPERIMENT = dbutils.widgets.get("PATH_TO_EXPERIMENT")
 client = MlflowClient()
 try:
   experiment_id = client.create_experiment(PATH_TO_MLFLOW_EXPERIMENT)

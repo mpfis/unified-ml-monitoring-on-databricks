@@ -139,6 +139,6 @@ display(spark.table(f"{DB_NAME}.sensor_data_drift"))
 # MAGIC %md
 # MAGIC ## Next Steps  
 # MAGIC   
-# MAGIC **For those with SQLA**: You can follow along and create some of the assets that we will walkthrough in SQL Analytics.  
+# MAGIC **For those with Databricks SQL**: You can follow along and create some of the assets that we will walkthrough in Databricks SQL.  
 # MAGIC   
-# MAGIC **For those without SQLA**: You can import these tables into the BI tool of your choice (i.e. PowerBI, Tableau), but if you are interested in doing this in SQL Analytics contact your Databricks account team and get SQL Analytics enabled for your workspace. We have provided a guide for implementing everything we are doing in SQL Analytics so you can come back to this and test it out on your own.
+# MAGIC **For those without Databricks SQL**: You can import these tables into the BI tool of your choice (i.e. PowerBI, Tableau), but if you are interested in doing this in Databricks SQL contact your Databricks account team and get Databricks SQL enabled for your workspace. We have provided a guide for implementing everything we are doing in Databricks SQL so you can come back to this and test it out on your own.

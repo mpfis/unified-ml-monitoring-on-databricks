@@ -17,5 +17,5 @@ print(DB_NAME)
 
 # COMMAND ----------
 
-PATH_TO_MLFLOW_EXPERIMENT = "/Shared/experiment/"
+PATH_TO_MLFLOW_EXPERIMENT = "/Shared/experiment_created"
 print(PATH_TO_MLFLOW_EXPERIMENT)

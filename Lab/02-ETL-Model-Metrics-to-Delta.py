@@ -27,7 +27,7 @@ import pandas as pd
 
 # COMMAND ----------
 
-expId = mlflow.get_experiment_by_name(PATH_TO_EXPERIMENT).experiment_id
+expId = mlflow.get_experiment_by_name(PATH_TO_MLFLOW_EXPERIMENT).experiment_id
 
 df = spark.read.format("mlflow-experiment").load(expId)
 
@@ -83,7 +83,7 @@ responseSchema = StructType([
 endpointName = "sensorpredictionbeta-service"
 appInsightsDF = spark.createDataFrame(rows, ["timestamp", "workspaceName", "endpointName", "containerId", "response", "requestId", "model", "inputData", "mlWorkspace"])
 appInsightsDF_Filtered = appInsightsDF.filter(appInsightsDF.endpointName.contains(endpointName))
-appInsightsDF_Filtered = appInsightsDF_Filtered.withColumn("pathToExperiment", lit(PATH_TO_EXPERIMENT)) \
+appInsightsDF_Filtered = appInsightsDF_Filtered.withColumn("pathToExperiment", lit(PATH_TO_MLFLOW_EXPERIMENT)) \
                                                 .withColumn("endpointName", lit(endpointName))
 
 # COMMAND ----------
@@ -172,7 +172,7 @@ unioned_metrics_for_model = unionedDFs.withColumn("date", col("timeStamp").cast(
                                           .groupBy("date", "hour").pivot("metric").sum("value") \
                                           .withColumn("timeStamp", (unix_timestamp(col('date').cast("timestamp"))+(col("hour")*3600)).cast("timestamp")) \
                                           .withColumn("MemoryUsageMB", col("MemoryUsage")/1000000) \
-                                          .withColumn("pathToExperiment", lit(PATH_TO_EXPERIMENT))
+                                          .withColumn("pathToExperiment", lit(PATH_TO_MLFLOW_EXPERIMENT))
 
 # COMMAND ----------
 
@@ -187,7 +187,3 @@ display(unioned_metrics_for_model)
 # MAGIC %md
 # MAGIC ## Next Step  
 # MAGIC With the model trained, deployed and its operational / training metrics extracted we can leverage these data points to first establish a process for calculating data drift and build a unified monitoring solution.  
-
-# COMMAND ----------
-
-

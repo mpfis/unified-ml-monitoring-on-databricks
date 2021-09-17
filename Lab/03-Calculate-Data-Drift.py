@@ -77,7 +77,7 @@
 
 # COMMAND ----------
 
-import numpy as np
+f"{DB_NAME}.sensor"import numpy as np
 from scipy.linalg import norm
 from scipy.spatial.distance import euclidean
 from datetime import datetime
@@ -85,7 +85,7 @@ from pyspark.sql.types import *
 from pyspark.sql.functions import *
 
 ## Training Dataset
-sensorTrainingDataDF = spark.read.table(f"sensor")
+sensorTrainingDataDF = spark.read.table(f"{DB_NAME}.sensor")
 ## Trace Data / Data Sent to the Model to be Scored
 sensorTraceDataDF = spark.read.table('parsedTraceData')
 

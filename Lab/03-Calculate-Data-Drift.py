@@ -77,7 +77,7 @@
 
 # COMMAND ----------
 
-f"{DB_NAME}.sensor"import numpy as np
+import numpy as np
 from scipy.linalg import norm
 from scipy.spatial.distance import euclidean
 from datetime import datetime

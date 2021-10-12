@@ -127,14 +127,6 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.ensemble import RandomForestRegressor
 
-
-def fetch_logged_data(run_id):
-    client = mlflow.tracking.MlflowClient()
-    data = client.get_run(run_id).data
-    tags = {k: v for k, v in data.tags.items() if not k.startswith("mlflow.")}
-    artifacts = [f.path for f in client.list_artifacts(run_id, "model")]
-    return data.params, data.metrics, tags, artifacts
-
 numEstimators = [10, 15, 20]
 maxDepths = [15, 20, 25]
 
@@ -146,14 +138,6 @@ for (numEstimator, maxDepth) in [(numEstimator, maxDepth) for numEstimator in nu
     model = RandomForestRegressor(max_depth = maxDepth, n_estimators = numEstimator)
     model.fit(train_x, train_y)
     preds = model.predict(test_x)
-
-# COMMAND ----------
-
-params, metrics, tags, artifacts = fetch_logged_data(run.info.run_id)
-
-# COMMAND ----------
-
-print(params,"\n", metrics,"\n", tags,"\n", artifacts)
 
 # COMMAND ----------
 

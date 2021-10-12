@@ -85,7 +85,7 @@ from pyspark.sql.types import *
 from pyspark.sql.functions import *
 
 ## Training Dataset
-sensorTrainingDataDF = spark.read.table(f"sensor")
+sensorTrainingDataDF = spark.read.table(f"{DB_NAME}.sensor")
 ## Trace Data / Data Sent to the Model to be Scored
 sensorTraceDataDF = spark.read.table('parsedTraceData')
 
